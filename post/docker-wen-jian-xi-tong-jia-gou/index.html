@@ -1,0 +1,349 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DOCKER 文件系统架构 | ligyong&#39;s blog</title>
+<link rel="shortcut icon" href="https://ligyong.github.io/favicon.ico?v=1693910118834">
+<link href="https://cdn.jsdelivr.net/npm/remixicon@2.3.0/fonts/remixicon.css" rel="stylesheet">
+<link rel="stylesheet" href="https://ligyong.github.io/styles/main.css">
+<link rel="alternate" type="application/atom+xml" title="DOCKER 文件系统架构 | ligyong&#39;s blog - Atom Feed" href="https://ligyong.github.io/atom.xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Droid+Serif:400,700">
+
+
+
+    <meta name="description" content="下载文件
+[root@node1 home]# docker pull nginx
+Using default tag: latest
+latest: Pulling from library/nginx
+f1f26f570256: Pul..." />
+    <meta name="keywords" content="" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.10.0/katex.min.css">
+    <script src="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.5.1/build/highlight.min.js"></script>
+  </head>
+  <body>
+    <div class="main">
+      <div class="main-content">
+        <div class="site-header">
+  <a href="https://ligyong.github.io">
+  <img class="avatar" src="https://ligyong.github.io/images/avatar.png?v=1693910118834" alt="">
+  </a>
+  <h1 class="site-title">
+    ligyong&#39;s blog
+  </h1>
+  <p class="site-description">
+    Good Good Study! Day Day Up! 
+  </p>
+  <div class="menu-container">
+    
+      
+        <a href="/" class="menu">
+          首页
+        </a>
+      
+    
+      
+        <a href="/archives" class="menu">
+          归档
+        </a>
+      
+    
+      
+        <a href="/tags" class="menu">
+          标签
+        </a>
+      
+    
+      
+        <a href="/post/about" class="menu">
+          关于
+        </a>
+      
+    
+  </div>
+  <div class="social-container">
+    
+      
+    
+      
+    
+      
+    
+      
+    
+      
+    
+  </div>
+</div>
+
+        <div class="post-detail">
+          <article class="post">
+            <h2 class="post-title">
+              DOCKER 文件系统架构
+            </h2>
+            <div class="post-info">
+              <span>
+                2023-09-05
+              </span>
+              <span>
+                5 min read
+              </span>
+              
+            </div>
+            
+            <div class="post-content-wrapper">
+              <div class="post-content" v-pre>
+                <h2 id="下载文件">下载文件</h2>
+<pre><code>[root@node1 home]# docker pull nginx
+Using default tag: latest
+latest: Pulling from library/nginx
+f1f26f570256: Pull complete 
+7f7f30930c6b: Pull complete 
+2836b727df80: Pull complete 
+e1eeb0f1c06b: Pull complete 
+86b2457cc2b0: Pull complete 
+9862f2ee2e8c: Pull complete 
+Digest: sha256:dbf632af6963e56f6b3fc4196578b75742482490c236f5009b3e68cf93a62997
+Status: Downloaded newer image for nginx:latest
+docker.io/library/nginx:latest
+</code></pre>
+<h2 id="获取image_id">获取image_id</h2>
+<h3 id="方法">方法</h3>
+<ol>
+<li>通过docker images命令获取镜像id</li>
+<li>docker所有的镜像在/var/lib/docker/image/overlay2/repositories.json中都有记录，可以直接在文件中查找</li>
+</ol>
+<h3 id="实践">实践</h3>
+<pre><code>[root@node1 home]# cat /var/lib/docker/image/overlay2/repositories.json |jq .|grep nginx:latest
+      &quot;nginx:latest&quot;: &quot;sha256:080ed0ed8312deca92e9a769b518cdfa20f5278359bd156f3469dd8fa532db6b&quot;,
+</code></pre>
+<h2 id="获取diff_ids">获取diff_ids</h2>
+<h3 id="方法-2">方法</h3>
+<pre><code>根据获取到的image_id，在/var/lib/docker/image/overlay2/imagedb/content/sha256/$iamge_id中获取镜像的相关信息，其中rootfs记录了镜像各层的diff_id
+</code></pre>
+<h3 id="实践-2">实践</h3>
+<pre><code>cat /var/lib/docker/image/overlay2/imagedb/content/sha256/080ed0ed8312deca92e9a769b518cdfa20f5278359bd156f3469dd8fa532db6b |jq .
+...
+&quot;rootfs&quot;: {
+    &quot;type&quot;: &quot;layers&quot;,
+    &quot;diff_ids&quot;: [
+      &quot;sha256:3af14c9a24c941c626553628cf1942dcd94d40729777f2fcfbcd3b8a3dfccdd6&quot;,
+      &quot;sha256:af29ec691175380d67613953dfb815a47cbcdc5a10221ab1047668cda2efc9ee&quot;,
+      &quot;sha256:a0b795906dc1f8bb47568da6335c0b5e5049aefc9b0bf3bfe6a9a90e55e8ca36&quot;,
+      &quot;sha256:95457f8a16fd7d0e872c8ccd8ffa84b79b8aa56a39ca5a84bf54c1fab9bac712&quot;,
+      &quot;sha256:4d0bf5b5e17b1bf57a06893ca4cdb58189efcf348b817d33850aa04ab403e4f1&quot;,
+      &quot;sha256:ff4557f62768fd99a55c9596bcc2ade44045c47a089a898a14d73b50a306c74d&quot;
+    ]
+  }
+...
+</code></pre>
+<h2 id="获取chain_id">获取chain_id</h2>
+<h3 id="方法-3">方法</h3>
+<ol>
+<li>如果镜像层为最底层，该层diff_id就是chain_id</li>
+<li>chain_id=sha256(sha256:父chain_id+&quot; &quot;+sha256:本层diff_id)</li>
+</ol>
+<h3 id="实践-3">实践</h3>
+<pre><code>1. 3af14c9a24c941c626553628cf1942dcd94d40729777f2fcfbcd3b8a3dfccdd6为最高层，diff_id就是chain_id
+2. af29ec691175380d67613953dfb815a47cbcdc5a10221ab1047668cda2efc9ee层chaind_id=sha256(&quot;sha256:3af14c9a24c941c626553628cf1942dcd94d40729777f2fcfbcd3b8a3dfccdd6 sha256:af29ec691175380d67613953dfb815a47cbcdc5a10221ab1047668cda2efc9ee&quot;)
+[root@node1 home]# echo -n &quot;sha256:3af14c9a24c941c626553628cf1942dcd94d40729777f2fcfbcd3b8a3dfccdd6 sha256:af29ec691175380d67613953dfb815a47cbcdc5a10221ab1047668cda2efc9ee&quot;| sha256sum 
+4da23111cc0445f1a069ac60b0575acfc86218f0783d48440f32b35bde461a41  -
+...
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>diff_id</th>
+<th>chain_id</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3af14c9a24c941c626553628cf1942dcd94d40729777f2fcfbcd3b8a3dfccdd63af14c9a24c941</td>
+<td>c626553628cf1942dcd94d40729777f2fcfbcd3b8a3dfccdd6af29ec691175380d67613953dfb8</td>
+</tr>
+<tr>
+<td>15a47cbcdc5a10221ab1047668cda2efc9ee4da23111cc0445f1a069ac60b0575acfc86218f078</td>
+<td>3d48440f32b35bde461a41a0b795906dc1f8bb47568da6335c0b5e5049aefc9b0bf3bfe6a9a90e</td>
+</tr>
+<tr>
+<td>55e8ca36e5804950d08e966c6a00a433c67a12cff6347e5e2108865dfde6148f8d18130e95457f</td>
+<td>8a16fd7d0e872c8ccd8ffa84b79b8aa56a39ca5a84bf54c1fab9bac712f71bcdb5f9b7b85bc15a</td>
+</tr>
+<tr>
+<td>cf26db665dbd64f1e59fc13cbdfa7b7cac4fed5c3ac14d0bf5b5e17b1bf57a06893ca4cdb58189</td>
+<td>efcf348b817d33850aa04ab403e4f152c16551e27714b78f78d51673e87d8327b6878f61f5ed37</td>
+</tr>
+<tr>
+<td>bbda99b30bd6258fff4557f62768fd99a55c9596bcc2ade44045c47a089a898a14d73b50a306c7</td>
+<td>4dd78ffa8b3ff6145eb277087027ab2f07317ef3c8155dea0c68aba0be0dc9e357</td>
+</tr>
+</tbody>
+</table>
+<h2 id="获取cache_id">获取cache_id</h2>
+<h3 id="方法-4">方法</h3>
+<pre><code>[root@node1 home]# ll /var/lib/docker/image/overlay2/layerdb/sha256/3af14c9a24c941c626553628cf1942dcd94d40729777f2fcfbcd3b8a3dfccdd6/
+-rw-r--r-- 1 root root     64 4月  12 15:35 cache-id
+-rw-r--r-- 1 root root     71 4月  12 15:35 diff
+-rw-r--r-- 1 root root      8 4月  12 15:35 size
+-rw-r--r-- 1 root root 269333 4月  12 15:35 tar-split.json.gz
+</code></pre>
+<p>cache-id: cache-id是docker下载layer的时候在本地生成的一个随机uuid，指向真正存放layer文件的地方<br>
+diff: 文件存放layer的diff_id<br>
+parent: parent文件存放当前layer的父layer的diff_id，注意：对于最底层的layer来说，由于没有父layer，所以没有这个文件<br>
+size: 当前layer的大小，单位是字节<br>
+tar-split.json.gz: layer压缩包的split文件，通过这个文件可以还原layer的tar包，在docker save导出image的时候会用到</p>
+<h3 id="实践-4">实践</h3>
+<table>
+<thead>
+<tr>
+<th>chain_id</th>
+<th>cache_id</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3af14c9a24c941c626553628cf1942dcd94d40729777f2fcfbcd3b8a3dfccdd6815eb7a2d1fe5e</td>
+<td>0585f7d425fd6cc2d7c02e5dcbc73472d047d1433f98e256884da23111cc0445f1a069ac60b057</td>
+</tr>
+<tr>
+<td>5acfc86218f0783d48440f32b35bde461a41626343f27d2d46c37b8ec4cda18f41fb1d6cdbcc83</td>
+<td>d23055233704d82454aad4e5804950d08e966c6a00a433c67a12cff6347e5e2108865dfde6148f</td>
+</tr>
+<tr>
+<td>8d18130eb3707bfa28f29f4ddb2f92ae4da0a4b36fb1f82317efe9fc065ecf9e58f6678af71bcd</td>
+<td>b5f9b7b85bc15acf26db665dbd64f1e59fc13cbdfa7b7cac4fed5c3ac1f81ad6d90d13053596f0</td>
+</tr>
+<tr>
+<td>a6beb8b6c2a2ad7b3879c4a2401cbf8af6e3540a9cb452c16551e27714b78f78d51673e87d8327</td>
+<td>b6878f61f5ed37bbda99b30bd6258f3bd3bc660db647af01e0867f5715655a5020bd25146912b4</td>
+</tr>
+<tr>
+<td>364f295b12f1e530d78ffa8b3ff6145eb277087027ab2f07317ef3c8155dea0c68aba0be0dc9e3</td>
+<td>5745b8495b991880ae85bec9cd1cfb535f54637bbbdf810b1cca6675ce0330a162</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rolayer">roLayer</h3>
+<pre><code>用于描述不可改变的镜像层，它的元数据位于 /var/lib/docker/image/&lt;storage_driver&gt;/layerdb/sha256/&lt;chain_id&gt;，由上述的rootfs组成。
+mountedLayer
+用于描述可读写的容器层。它的元数据位于/var/lib/docker/image/&lt;storage_driver&gt;/layerdb/mounts/&lt;container_id&gt;/，组成：
+</code></pre>
+<p>init层： 用于修改容器中一些文件如/etc/hostname，/etc/hosts，/etc/resolv.conf等。init层属于mountedLayer。<br>
+容器层：使用联合挂载统一给用户提供的可读写目录。容器层属于mountedLayer。<br>
+/var/lib/docker/image/overlay2/layerdb/mounts/$container_id/init-id:mountId+“init”mount-id:存储在/var/lib/docker/overlay2/的目录名称parent:镜像最上层chain_id</p>
+<h2 id="container文件系统组成">container文件系统组成</h2>
+<pre><code>[root@node1 home]# docker container inspect 6da514534085
+...
+&quot;GraphDriver&quot;: {
+            &quot;Data&quot;: {
+                &quot;LowerDir&quot;: &quot;/var/lib/docker/overlay2/911829ab5f9852edb217516b3285b99fc4ef01647054d0355a0b8b18634a7bcf-init/diff:/var/lib/docker/overlay2/45b8495b991880ae85bec9cd1cfb535f54637bbbdf810b1cca6675ce0330a162/diff:/var/lib/docker/overlay2/3bd3bc660db647af01e0867f5715655a5020bd25146912b4364f295b12f1e530/diff:/var/lib/docker/overlay2/f81ad6d90d13053596f0a6beb8b6c2a2ad7b3879c4a2401cbf8af6e3540a9cb4/diff:/var/lib/docker/overlay2/b3707bfa28f29f4ddb2f92ae4da0a4b36fb1f82317efe9fc065ecf9e58f6678a/diff:/var/lib/docker/overlay2/626343f27d2d46c37b8ec4cda18f41fb1d6cdbcc83d23055233704d82454aad4/diff:/var/lib/docker/overlay2/815eb7a2d1fe5e0585f7d425fd6cc2d7c02e5dcbc73472d047d1433f98e25688/diff&quot;,
+                &quot;MergedDir&quot;: &quot;/var/lib/docker/overlay2/911829ab5f9852edb217516b3285b99fc4ef01647054d0355a0b8b18634a7bcf/merged&quot;,
+                &quot;UpperDir&quot;: &quot;/var/lib/docker/overlay2/911829ab5f9852edb217516b3285b99fc4ef01647054d0355a0b8b18634a7bcf/diff&quot;,
+                &quot;WorkDir&quot;: &quot;/var/lib/docker/overlay2/911829ab5f9852edb217516b3285b99fc4ef01647054d0355a0b8b18634a7bcf/work&quot;
+            },
+            &quot;Name&quot;: &quot;overlay2&quot;
+        },
+...
+1. LowderDir: 可以是多个，是处于最底层的目录，作为只读层
+2. MergedDir:为最后联合挂载完成给用户呈现的统一视图
+3. UpperDir:读写层
+4. WorkDir:工作基础目录，挂载后内容会被清空，且在使用过程中其内容用户不可见
+</code></pre>
+
+              </div>
+              <div class="toc-container">
+                <ul class="markdownIt-TOC">
+<li>
+<ul>
+<li><a href="#%E4%B8%8B%E8%BD%BD%E6%96%87%E4%BB%B6">下载文件</a></li>
+<li><a href="#%E8%8E%B7%E5%8F%96image_id">获取image_id</a>
+<ul>
+<li><a href="#%E6%96%B9%E6%B3%95">方法</a></li>
+<li><a href="#%E5%AE%9E%E8%B7%B5">实践</a></li>
+</ul>
+</li>
+<li><a href="#%E8%8E%B7%E5%8F%96diff_ids">获取diff_ids</a>
+<ul>
+<li><a href="#%E6%96%B9%E6%B3%95-2">方法</a></li>
+<li><a href="#%E5%AE%9E%E8%B7%B5-2">实践</a></li>
+</ul>
+</li>
+<li><a href="#%E8%8E%B7%E5%8F%96chain_id">获取chain_id</a>
+<ul>
+<li><a href="#%E6%96%B9%E6%B3%95-3">方法</a></li>
+<li><a href="#%E5%AE%9E%E8%B7%B5-3">实践</a></li>
+</ul>
+</li>
+<li><a href="#%E8%8E%B7%E5%8F%96cache_id">获取cache_id</a>
+<ul>
+<li><a href="#%E6%96%B9%E6%B3%95-4">方法</a></li>
+<li><a href="#%E5%AE%9E%E8%B7%B5-4">实践</a></li>
+<li><a href="#rolayer">roLayer</a></li>
+</ul>
+</li>
+<li><a href="#container%E6%96%87%E4%BB%B6%E7%B3%BB%E7%BB%9F%E7%BB%84%E6%88%90">container文件系统组成</a></li>
+</ul>
+</li>
+</ul>
+
+              </div>
+            </div>
+          </article>
+        </div>
+
+        
+
+        
+
+        <div class="site-footer">
+  Powered by <a href="https://github.com/getgridea/gridea" target="_blank">Gridea</a>
+  <a class="rss" href="https://ligyong.github.io/atom.xml" target="_blank">
+    <i class="ri-rss-line"></i> RSS
+  </a>
+</div>
+
+      </div>
+    </div>
+
+    <script>
+      hljs.initHighlightingOnLoad()
+
+      let mainNavLinks = document.querySelectorAll(".markdownIt-TOC a");
+
+      // This should probably be throttled.
+      // Especially because it triggers during smooth scrolling.
+      // https://lodash.com/docs/4.17.10#throttle
+      // You could do like...
+      // window.addEventListener("scroll", () => {
+      //    _.throttle(doThatStuff, 100);
+      // });
+      // Only not doing it here to keep this Pen dependency-free.
+
+      window.addEventListener("scroll", event => {
+        let fromTop = window.scrollY;
+
+        mainNavLinks.forEach((link, index) => {
+          let section = document.getElementById(decodeURI(link.hash).substring(1));
+          let nextSection = null
+          if (mainNavLinks[index + 1]) {
+            nextSection = document.getElementById(decodeURI(mainNavLinks[index + 1].hash).substring(1));
+          }
+          if (section.offsetTop <= fromTop) {
+            if (nextSection) {
+              if (nextSection.offsetTop > fromTop) {
+                link.classList.add("current");
+              } else {
+                link.classList.remove("current");    
+              }
+            } else {
+              link.classList.add("current");
+            }
+          } else {
+            link.classList.remove("current");
+          }
+        });
+      });
+
+    </script>
+  </body>
+</html>
